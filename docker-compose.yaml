@@ -1,0 +1,55 @@
+ version: '3.8'
+
+services:
+  postgres:
+    image: ankane/pgvector
+    container_name: postgres-face
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d postgres"]
+      interval: 10s
+      retries: 5
+      timeout: 5s
+
+  triton:
+    image: nvcr.io/nvidia/tritonserver:23.12-py3
+    container_name: triton-server
+    ports:
+      - "8000:8000"  # HTTP inference requests
+      - "8001:8001"  # gRPC inference requests
+      - "8002:8002"  # Prometheus metrics monitoring
+    volumes:
+      - ./triton_model_repository:/models
+    command: tritonserver --model-repository=/models --backend-config=python,version=3 --backend-config=onnx,cpu-only=1
+    restart: always
+
+  face-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: face-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      triton:
+        condition: service_started
+    ports:
+      - "3010:3010"
+    environment:
+      DATABASE_URL: postgresql://admin:password123@postgres:5432/postgres
+      TRITON_SERVER_URL: http://triton:8000
+    volumes:
+      - .:/app
+    command: uvicorn api:app --host 0.0.0.0 --port 3010 --reload
+    restart: always
+
+volumes:
+  pgdata:
